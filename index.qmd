@@ -1,0 +1,13 @@
+# About the Book
+
+## Application of double cross-fit TMLE to estimate Right Heart Catheterization's effect on hospital stay
+
+Momenul Haque Mondol & Ehsan Karim
+
+### Description
+
+This book describes the step-wise implementation of double cross-fit TMLE and AIPW in Right Heart Catheterization (RHC) data.
+
+### How to cite
+
+Mondol MH, Karim ME (2024) "Application of double cross-fit doubly robust estimators to estimate Right Heart Catheterization's effect on hospital stay", URL: https://github.com/momenulhaque/DC-double-robust-methods-for-RHC-data

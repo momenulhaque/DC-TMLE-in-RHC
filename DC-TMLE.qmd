@@ -1,0 +1,414 @@
+# Implementation of DC-TMLE
+
+## Required packages
+
+```{r, eval=FALSE}
+remotes::install_github("momenulhaque/Crossfit") 
+library(Crossfit)
+library(tidyverse)
+library(SuperLearner)
+
+```
+
+
+## Preparing analytic data 
+
+```{r, cache=TRUE, eval=FALSE}
+ObsData <- read.csv("https://hbiostat.org/data/repo/rhc.csv", header = TRUE)
+# add column for outcome Y: length of stay 
+# Y = date of discharge - study admission date
+# Y = date of death - study admission date if date of discharge not available
+ObsData$Y <- ObsData$dschdte - ObsData$sadmdte
+ObsData$Y[is.na(ObsData$Y)] <- ObsData$dthdte[is.na(ObsData$Y)] - 
+  ObsData$sadmdte[is.na(ObsData$Y)]
+
+# remove outcomes we are not examining in this example
+ObsData <- dplyr::select(ObsData, 
+                         !c(dthdte,lstctdte,dschdte,death,t3d30,dth30,surv2md1))
+# remove unnecessary and problematic variables 
+ObsData <- dplyr::select(ObsData,
+                         !c(sadmdte,ptid,X,adld3p,urin1,cat2))
+
+# convert all categorical variables to factors 
+factors <- c("cat1", "ca", "cardiohx", "chfhx", "dementhx", "psychhx", 
+             "chrpulhx", "renalhx", "liverhx", "gibledhx", "malighx", 
+             "immunhx", "transhx", "amihx", "sex", "dnr1", "ninsclas", 
+             "resp", "card", "neuro", "gastr", "renal", "meta", "hema", 
+             "seps", "trauma", "ortho", "race", "income")
+ObsData[factors] <- lapply(ObsData[factors], as.factor)
+# convert our treatment A (RHC vs. No RHC) to a binary variable
+ObsData$A <- ifelse(ObsData$swang1 == "RHC", 1, 0)
+ObsData <- dplyr::select(ObsData, !swang1)
+# categorize the variables to match with the original paper
+ObsData$age <- cut(ObsData$age,breaks=c(-Inf, 50, 60, 70, 80, Inf),right=FALSE)
+ObsData$race <- factor(ObsData$race, levels=c("white","black","other"))
+ObsData$sex <- as.factor(ObsData$sex)
+ObsData$sex <- relevel(ObsData$sex, ref = "Male")
+ObsData$cat1 <- as.factor(ObsData$cat1)
+levels(ObsData$cat1) <- c("ARF","CHF","Other","Other","Other",
+                          "Other","Other","MOSF","MOSF")
+ObsData$ca <- as.factor(ObsData$ca)
+levels(ObsData$ca) <- c("Metastatic","None","Localized (Yes)")
+ObsData$ca <- factor(ObsData$ca, levels=c("None", "Localized (Yes)", "Metastatic"))
+# rename variables
+names(ObsData) <- c("Disease.category", "Cancer", "Cardiovascular", 
+                    "Congestive.HF", "Dementia", "Psychiatric", "Pulmonary", 
+                    "Renal", "Hepatic", "GI.Bleed", "Tumor", 
+                    "Immunosuppression", "Transfer.hx", "MI", "age", "sex", 
+                    "edu", "DASIndex", "APACHE.score", "Glasgow.Coma.Score", 
+                    "blood.pressure", "WBC", "Heart.rate", "Respiratory.rate", 
+                    "Temperature", "PaO2vs.FIO2", "Albumin", "Hematocrit", 
+                    "Bilirubin", "Creatinine", "Sodium", "Potassium", "PaCo2", 
+                    "PH", "Weight", "DNR.status", "Medical.insurance", 
+                    "Respiratory.Diag", "Cardiovascular.Diag", 
+                    "Neurological.Diag", "Gastrointestinal.Diag", "Renal.Diag", 
+                    "Metabolic.Diag", "Hematologic.Diag", "Sepsis.Diag", 
+                    "Trauma.Diag", "Orthopedic.Diag", "race", "income", 
+                    "Y", "A")
+saveRDS(ObsData, "ObsData.rds")
+
+```
+
+## Box 1: Dividing analytic data into three splits
+
+```{r, eval=FALSE}
+min.Y <- min(ObsData$Y)
+max.Y <- max(ObsData$Y)
+ObsData$Y.star <- (ObsData$Y-min.Y)/(max.Y-min.Y)
+splits <- sample(rep(1:3, diff(floor(nrow(ObsData) * c(0, 1/3, 2/3, 3/3)))))
+ObsData <- ObsData %>% mutate(s=splits)
+# Create nested data set
+dat_nested_p <- ObsData %>% group_by(s) %>% nest()
+dat_nested_p
+```
+
+## Box 2: Estimation of exposure model $\widehat{f_{\pi}(l)}$
+```{r, cache=TRUE, eval=FALSE}
+L <- names(dplyr::select(ObsData, !c(Y, Y.star, A, s)))
+pi_fitter <- function(df){
+  SuperLearner::SuperLearner(Y=as.matrix(df[, "A"]),
+                             X=df[, L],
+                             family="binomial", 
+                             SL.library=c("SL.glmnet", "SL.randomForest",
+                                          "SL.xgboost"),
+                             cvControl=list(V = 10, stratifyCV = FALSE, 
+                                            shuffle = TRUE, validRows = NULL))}
+dat_nested_p <- dat_nested_p %>% mutate(pi_fit = purrr::map(data, pi_fitter))
+dat_nested_p # "pi_fit" variable is added to this nested list 
+```
+
+
+
+## Box 3: Estimating outcome nuisance function  $\widehat{f_m(a, l)}$
+```{r, cache=TRUE, eval=FALSE}
+A.L <- names(dplyr::select(ObsData, !c(Y, Y.star, s)))
+m_fitter <- function(df){
+  SuperLearner::SuperLearner(Y=as.matrix(df[, "Y.star"]),
+                             X=df[, A.L],
+                             family="gaussian", 
+                             SL.library=c("SL.glmnet", "SL.randomForest",
+                                          "SL.xgboost"),
+                             cvControl=list(V = 10, stratifyCV = FALSE, 
+                                            shuffle = TRUE, validRows = NULL))
+}
+dat_nested_p <- dat_nested_p %>% mutate(m_fit=purrr::map(data, m_fitter))
+dat_nested_p # "m_fit" variable is added to existing list 
+```
+
+## Box 4: Predicting the probability of receiving RHC using $\widehat{f_{\pi}(l)}$
+
+```{r, eval=FALSE}
+ObsData <- ObsData %>%
+  mutate(pi1 = predict(dat_nested_p$pi_fit[[1]], newdata = ObsData[, L])$pred,
+         pi2 = predict(dat_nested_p$pi_fit[[2]], newdata = ObsData[, L])$pred,
+         pi3 = predict(dat_nested_p$pi_fit[[3]], newdata = ObsData[, L])$pred)
+
+```
+
+## Box 5: Box 5: Bounding the prediction to avoid positivity assumption
+
+```{r, eval=FALSE}
+ObsData <- ObsData %>%
+  mutate(pi1 = ifelse(pi1<1e-17, 1e-17, ifelse(pi1>(1-1e-17),(1-1e-17), pi1)),
+         pi2 = ifelse(pi2<1e-17, 1e-17, ifelse(pi2>(1-1e-17),(1-1e-17), pi2)), 
+         pi3 = ifelse(pi3<1e-17, 1e-17, ifelse(pi3>(1-1e-17),(1-1e-17), pi3)))
+
+```
+
+## Box 6: Predicting the outcome under each exposure status
+
+```{r, eval=FALSE}
+ObsData1 <- ObsData %>% mutate(A=1)
+ObsData0 <- ObsData %>% mutate(A=0)
+
+ObsData <- ObsData %>% mutate(
+  mu1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData[, A.L])$pred,
+  mu2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData[, A.L])$pred,
+  mu3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData[, A.L])$pred,
+  mu1_1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData1[, A.L])$pred,
+  mu1_2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData1[, A.L])$pred,
+  mu1_3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData1[, A.L])$pred,
+  mu0_1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData0[, A.L])$pred,
+  mu0_2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData0[, A.L])$pred,
+  mu0_3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData0[, A.L])$pred)
+```
+
+
+## Box 7: Estimating the clever covariates $\widehat{H(a, l)}$
+
+```{r, eval=FALSE}
+ObsData <- ObsData %>% 
+  mutate(H1_1 = A/pi1, 
+         H1_2 = A/pi2, 
+         H1_3 = A/pi3, 
+         H0_1 = (1-A)/(1-pi1),
+         H0_2 = (1-A)/(1-pi2), 
+         H0_3 = (1-A)/(1-pi3))
+
+```
+
+
+## Box 8: Estimating the influence parameter $\hat{\epsilon}$
+
+```{r, eval=FALSE}
+e1 <- coef(glm(Y.star ~ -1 + H0_2 + H1_2 + offset(qlogis(mu3)),
+               data = ObsData %>% filter(s==1), family = binomial))
+e2 <- coef(glm(Y.star ~ -1 + H0_3 + H1_3 + offset(qlogis(mu1)), 
+               data = ObsData %>% filter(s==2), family = binomial))
+e3 <- coef(glm(Y.star ~ -1 + H0_1 + H1_1 + offset(qlogis(mu2)), 
+               data = ObsData %>% filter(s==3), family = binomial))
+
+```
+
+
+
+## Box 9: Updating the predicted outcomes 
+
+```{r, eval=FALSE}
+ObsData = ObsData %>% mutate(
+  mu0_1s = plogis(qlogis(mu0_1) + e3[1] / (1 - pi2)),
+  mu0_2s = plogis(qlogis(mu0_2) + e1[1] / (1 - pi3)),
+  mu0_3s = plogis(qlogis(mu0_3) + e2[1] / (1 - pi1)),
+  mu1_1s = plogis(qlogis(mu1_1) + e3[2] / (pi2)),
+  mu1_2s = plogis(qlogis(mu1_2) + e1[2] / (pi3)),
+  mu1_3s = plogis(qlogis(mu1_3) + e2[2] / (pi1)))
+```
+
+
+## Box 10: Estimating the ATE
+
+```{r, eval=FALSE}
+r1_1 = mean(filter(ObsData, s==1)$mu1_1s)
+r1_2 = mean(filter(ObsData, s==2)$mu1_2s)
+r1_3 = mean(filter(ObsData, s==3)$mu1_3s)
+r0_1 = mean(filter(ObsData, s==1)$mu0_1s)
+r0_2 = mean(filter(ObsData, s==2)$mu0_2s)
+r0_3 = mean(filter(ObsData, s==3)$mu0_3s)
+ATE_1 = r1_1 - r0_1
+ATE_2 = r1_2 - r0_2
+ATE_3 = r1_3 - r0_3
+ATE <- (ATE_1 + ATE_2 + ATE_3)/3
+```
+
+
+
+## Box 11: Estimating the variance of ATE
+
+```{r, eval=FALSE}
+# Estimating efficient influence curve for exposed
+ObsData <- ObsData %>% mutate(if1_1 = A/pi2*(Y-mu1_1s) + mu1_1s - r1_1,
+                              if1_2 = A/pi3*(Y-mu1_2s) + mu1_2s - r1_2,
+                              if1_3 = A/pi1*(Y-mu1_3s) + mu1_3s - r1_3)
+# Estimating efficient influence curve for unexposed
+ObsData <- ObsData %>% mutate(if0_1 = (1-A)/(1-pi2)*(Y-mu0_1s) + mu0_1s - r0_1,
+                              if0_2 = (1-A)/(1-pi3)*(Y-mu0_2s) + mu0_2s - r0_2,
+                              if0_3 = (1-A)/(1-pi1)*(Y-mu0_3s) + mu0_3s - r0_3)
+# Calculating the variance of ATE
+ObsData <- ObsData %>% mutate(ifd_1 = if1_1 - if0_1, 
+                              ifd_2 = if1_2 - if0_2,
+                              ifd_3 = if1_3 - if0_3)
+# Variance of local ATE 
+var1_ATE = var(filter(ObsData, s==1)$ifd_1)
+var2_ATE = var(filter(ObsData, s==2)$ifd_2)
+var3_ATE = var(filter(ObsData, s==3)$ifd_3)
+# Variance of global ATE
+var_ATE = (var1_ATE + var2_ATE + var3_ATE)/(3*nrow(ObsData))
+```
+
+
+## Box 12: Repeating the steps 1-11 for 100 times and estimate the overall ATE and variance of overall ATE
+
+```{r, eval=FALSE}
+min.Y <- min(ObsData$Y)
+max.Y <- max(ObsData$Y)
+ObsData$Y.star <- (ObsData$Y-min.Y)/(max.Y-min.Y)
+
+DC_tmle_fit = function(ObsData, seed = 123){
+  set.seed(seed)
+  splits <- sample(rep(1:3, diff(floor(nrow(ObsData) * c(0, 1/3, 2/3, 3/3)))))
+  ObsData <- ObsData %>% mutate(s=splits)
+  # Create nested data set
+  ObsData = ObsData %>% mutate(s=splits) %>% arrange(s)
+  # Create nested data set
+  dat_nested_p <- ObsData %>% group_by(s) %>% tidyr::nest()
+  dat_nested_p # a nested list of three data set (splits)  
+  
+  L <- names(dplyr::select(ObsData, !c(Y, Y.star, A, s)))
+  pi_fitter <- function(df){
+    SuperLearner::SuperLearner(Y=as.matrix(df[, "A"]),
+                               X=df[, L],
+                               family="binomial", 
+                               SL.library=c("SL.glmnet", "SL.randomForest",
+                                            "SL.xgboost"),
+                               cvControl=list(V = 3, stratifyCV = FALSE, 
+                                              shuffle = TRUE, validRows = NULL))}
+  dat_nested_p <- dat_nested_p %>% mutate(pi_fit = purrr::map(data, pi_fitter))
+  dat_nested_p # "pi_fit" variable is added to this nested list 
+  
+  A.L <- names(dplyr::select(ObsData, !c(Y, Y.star, s)))
+  m_fitter <- function(df){
+    SuperLearner::SuperLearner(Y=as.matrix(df[, "Y.star"]),
+                               X=df[, A.L],
+                               family="gaussian", 
+                               SL.library=c("SL.glmnet", "SL.randomForest",
+                                            "SL.xgboost"),
+                               cvControl=list(V = 3, stratifyCV = FALSE, 
+                                              shuffle = TRUE, validRows = NULL))
+  }
+  dat_nested_p <- dat_nested_p %>% mutate(m_fit=purrr::map(data, m_fitter))
+  dat_nested_p # "m_fit" variable is added to existing list 
+  
+  ObsData <- ObsData %>%
+    mutate(pi1 = predict(dat_nested_p$pi_fit[[1]], newdata = ObsData[, L])$pred,
+           pi2 = predict(dat_nested_p$pi_fit[[2]], newdata = ObsData[, L])$pred,
+           pi3 = predict(dat_nested_p$pi_fit[[3]], newdata = ObsData[, L])$pred)
+  
+  ObsData <- ObsData %>%
+    mutate(pi1 = ifelse(pi1<0.00001, 0.00001, ifelse(pi1>0.99999,0.99999, pi1)),
+           pi2 = ifelse(pi2<0.00001, 0.00001, ifelse(pi2>0.99999,0.99999, pi2)), 
+           pi3 = ifelse(pi3<0.00001, 0.00001, ifelse(pi3>0.99999,0.99999, pi3)))
+  
+  ObsData1 <- ObsData %>% mutate(A=1)
+  ObsData0 <- ObsData %>% mutate(A=0)
+  
+  ObsData <- ObsData %>% mutate(
+    mu1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData[, A.L])$pred,
+    mu2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData[, A.L])$pred,
+    mu3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData[, A.L])$pred,
+    mu1_1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData1[, A.L])$pred,
+    mu1_2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData1[, A.L])$pred,
+    mu1_3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData1[, A.L])$pred,
+    mu0_1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData0[, A.L])$pred,
+    mu0_2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData0[, A.L])$pred,
+    mu0_3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData0[, A.L])$pred)
+  
+  ObsData <- ObsData %>% 
+    mutate(H1_1 = A/pi1, 
+           H1_2 = A/pi2, 
+           H1_3 = A/pi3, 
+           H0_1 = (1-A)/(1-pi1),
+           H0_2 = (1-A)/(1-pi2), 
+           H0_3 = (1-A)/(1-pi3))
+  
+  e1 <- coef(glm(Y.star ~ -1 + H0_2 + H1_2 + offset(qlogis(mu3)),
+                 data = ObsData %>% filter(s==1), family = binomial))
+  e2 <- coef(glm(Y.star ~ -1 + H0_3 + H1_3 + offset(qlogis(mu1)), 
+                 data = ObsData %>% filter(s==2), family = binomial))
+  e3 <- coef(glm(Y.star ~ -1 + H0_1 + H1_1 + offset(qlogis(mu2)), 
+                 data = ObsData %>% filter(s==3), family = binomial))
+  
+  ObsData = ObsData %>% mutate(
+    mu0_1s = plogis(qlogis(mu0_1) + e3[1] / (1 - pi2)),
+    mu0_2s = plogis(qlogis(mu0_2) + e1[1] / (1 - pi3)),
+    mu0_3s = plogis(qlogis(mu0_3) + e2[1] / (1 - pi1)),
+    mu1_1s = plogis(qlogis(mu1_1) + e3[2] / (pi2)),
+    mu1_2s = plogis(qlogis(mu1_2) + e1[2] / (pi3)),
+    mu1_3s = plogis(qlogis(mu1_3) + e2[2] / (pi1)))
+  
+  r1_1 = mean(filter(ObsData, s==1)$mu1_1s)
+  r1_2 = mean(filter(ObsData, s==2)$mu1_2s)
+  r1_3 = mean(filter(ObsData, s==3)$mu1_3s)
+  r0_1 = mean(filter(ObsData, s==1)$mu0_1s)
+  r0_2 = mean(filter(ObsData, s==2)$mu0_2s)
+  r0_3 = mean(filter(ObsData, s==3)$mu0_3s)
+  ATE_1 = r1_1 - r0_1
+  ATE_2 = r1_2 - r0_2
+  ATE_3 = r1_3 - r0_3
+  ATE <- (ATE_1 + ATE_2 + ATE_3) / 3
+  
+  # Estimating efficient influence curve for exposed
+  ObsData <- ObsData %>% mutate(if1_1 = A/pi2*(Y-mu1_1s) + mu1_1s - r1_1,
+                                if1_2 = A/pi3*(Y-mu1_2s) + mu1_2s - r1_2,
+                                if1_3 = A/pi1*(Y-mu1_3s) + mu1_3s - r1_3)
+  # Estimating efficient influence curve for unexposed
+  ObsData <- ObsData %>% mutate(if0_1 = (1-A)/(1-pi2)*(Y-mu0_1s) + mu0_1s - r0_1,
+                                if0_2 = (1-A)/(1-pi3)*(Y-mu0_2s) + mu0_2s - r0_2,
+                                if0_3 = (1-A)/(1-pi1)*(Y-mu0_3s) + mu0_3s - r0_3)
+  # Calculating the variance of ATE
+  ObsData <- ObsData %>% mutate(ifd_1 = if1_1 - if0_1, 
+                                ifd_2 = if1_2 - if0_2,
+                                ifd_3 = if1_3 - if0_3)
+  var1_ATE = var(filter(ObsData, s==1)$ifd_1)
+  var2_ATE = var(filter(ObsData, s==2)$ifd_2)
+  var3_ATE = var(filter(ObsData, s==3)$ifd_3)
+  var_ATE = (var1_ATE + var2_ATE + var3_ATE)/(3*nrow(ObsData))
+  result = data.frame(ATE = ATE, var = var_ATE)
+  return(result)
+}
+runs <- list()
+set.seed(2543)
+cf_seed = sample(100)
+for(i in 1:100){
+  fit_sngle_result = DC_tmle_fit(ObsData = ObsData, seed = cf_seed[i])
+  runs[[i]] <- fit_sngle_result
+}
+result = dplyr::bind_rows(runs)
+medians <- apply(result, 2, median, na.rm = TRUE)
+result <- result %>% mutate(var0 = var + (ATE - medians[1])^2)
+# Calculating overall ATE
+results <- apply(result, 2, median, na.rm = TRUE)
+t.value = qt((1-conf.level)/2, nrow(ObsData), lower.tail = F)
+l_ci = results[1] - t.value*sqrt(results[3])
+u_ci = results[1] + t.value*sqrt(results[3])
+res = tibble(ATE=results[1], lower.ci = l_ci, upper.ci = u_ci)
+res
+```
+
+## Box 13: Transforming the ATE and its confidence interval back to original scale
+
+```{r, eval=FALSE}
+# Transforming ATE to original scale
+res*(max.Y-min.Y)
+```
+
+
+## Box 14: Implementing DC-TMLE by R package
+
+```{r, eval=FALSE}
+library(Crossfit)
+library(SuperLearner)
+ObsData = readRDS("ObsData.rds")
+min.Y <- min(ObsData$Y)
+max.Y <- max(ObsData$Y)
+ObsData$Y.star <- (ObsData$Y-min.Y)/(max.Y-min.Y)
+L <- names(dplyr::select(ObsData, !c(Y, Y.star, A)))
+DC_tmle <- DC_tmle_g1_k(data = ObsData,
+                            exposure = "A",
+                            outcome = "Y.star",
+                            covarsT = L,
+                            covarsO = L,
+                            family.y = "gaussian",
+                            learners = c("SL.glmnet", "SL.randomForest", 
+                                           "SL.xgboost"),
+                            control = list(V = 10, stratifyCV = FALSE, 
+                                           shuffle = TRUE, validRows = NULL),
+                            num_cf = 100, 
+                            n_split = 3,
+                            seed = 2575,
+                            conf.level = 0.95)
+# Estimates of ATE in transformed scale
+DC_tmle
+# Estimates of ATE in original scale
+DC_tmle*(max.Y-min.Y)
+```
+

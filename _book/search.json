@@ -1,0 +1,128 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Application of double cross-fit TMLE estimator to estimate Right Heart Catheterization’s effect on the hospital stays",
+    "section": "",
+    "text": "1 About the Book"
+  },
+  {
+    "objectID": "index.html#application-of-double-cross-fit-tmle-to-estimate-right-heart-catheterizations-effect-on-hospital-stay",
+    "href": "index.html#application-of-double-cross-fit-tmle-to-estimate-right-heart-catheterizations-effect-on-hospital-stay",
+    "title": "Application of double cross-fit TMLE estimator to estimate Right Heart Catheterization’s effect on the hospital stays",
+    "section": "1.1 Application of double cross-fit TMLE to estimate Right Heart Catheterization’s effect on hospital stay",
+    "text": "1.1 Application of double cross-fit TMLE to estimate Right Heart Catheterization’s effect on hospital stay\nMomenul Haque Mondol & Ehsan Karim\n\n1.1.1 Description\nThis book describes the step-wise implementation of double cross-fit TMLE and AIPW in Right Heart Catheterization (RHC) data.\n\n\n1.1.2 How to cite\nMondol MH, Karim ME (2024) “Application of double cross-fit doubly robust estimators to estimate Right Heart Catheterization’s effect on hospital stay”, URL: https://github.com/momenulhaque/DC-double-robust-methods-for-RHC-data"
+  },
+  {
+    "objectID": "DC-TMLE.html#required-packages",
+    "href": "DC-TMLE.html#required-packages",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.1 Required packages",
+    "text": "2.1 Required packages\n\nremotes::install_github(\"momenulhaque/Crossfit\") \nlibrary(Crossfit)\nlibrary(tidyverse)\nlibrary(SuperLearner)"
+  },
+  {
+    "objectID": "DC-TMLE.html#preparing-analytic-data",
+    "href": "DC-TMLE.html#preparing-analytic-data",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.2 Preparing analytic data",
+    "text": "2.2 Preparing analytic data\n\nObsData &lt;- read.csv(\"https://hbiostat.org/data/repo/rhc.csv\", header = TRUE)\n# add column for outcome Y: length of stay \n# Y = date of discharge - study admission date\n# Y = date of death - study admission date if date of discharge not available\nObsData$Y &lt;- ObsData$dschdte - ObsData$sadmdte\nObsData$Y[is.na(ObsData$Y)] &lt;- ObsData$dthdte[is.na(ObsData$Y)] - \n  ObsData$sadmdte[is.na(ObsData$Y)]\n\n# remove outcomes we are not examining in this example\nObsData &lt;- dplyr::select(ObsData, \n                         !c(dthdte,lstctdte,dschdte,death,t3d30,dth30,surv2md1))\n# remove unnecessary and problematic variables \nObsData &lt;- dplyr::select(ObsData,\n                         !c(sadmdte,ptid,X,adld3p,urin1,cat2))\n\n# convert all categorical variables to factors \nfactors &lt;- c(\"cat1\", \"ca\", \"cardiohx\", \"chfhx\", \"dementhx\", \"psychhx\", \n             \"chrpulhx\", \"renalhx\", \"liverhx\", \"gibledhx\", \"malighx\", \n             \"immunhx\", \"transhx\", \"amihx\", \"sex\", \"dnr1\", \"ninsclas\", \n             \"resp\", \"card\", \"neuro\", \"gastr\", \"renal\", \"meta\", \"hema\", \n             \"seps\", \"trauma\", \"ortho\", \"race\", \"income\")\nObsData[factors] &lt;- lapply(ObsData[factors], as.factor)\n# convert our treatment A (RHC vs. No RHC) to a binary variable\nObsData$A &lt;- ifelse(ObsData$swang1 == \"RHC\", 1, 0)\nObsData &lt;- dplyr::select(ObsData, !swang1)\n# categorize the variables to match with the original paper\nObsData$age &lt;- cut(ObsData$age,breaks=c(-Inf, 50, 60, 70, 80, Inf),right=FALSE)\nObsData$race &lt;- factor(ObsData$race, levels=c(\"white\",\"black\",\"other\"))\nObsData$sex &lt;- as.factor(ObsData$sex)\nObsData$sex &lt;- relevel(ObsData$sex, ref = \"Male\")\nObsData$cat1 &lt;- as.factor(ObsData$cat1)\nlevels(ObsData$cat1) &lt;- c(\"ARF\",\"CHF\",\"Other\",\"Other\",\"Other\",\n                          \"Other\",\"Other\",\"MOSF\",\"MOSF\")\nObsData$ca &lt;- as.factor(ObsData$ca)\nlevels(ObsData$ca) &lt;- c(\"Metastatic\",\"None\",\"Localized (Yes)\")\nObsData$ca &lt;- factor(ObsData$ca, levels=c(\"None\", \"Localized (Yes)\", \"Metastatic\"))\n# rename variables\nnames(ObsData) &lt;- c(\"Disease.category\", \"Cancer\", \"Cardiovascular\", \n                    \"Congestive.HF\", \"Dementia\", \"Psychiatric\", \"Pulmonary\", \n                    \"Renal\", \"Hepatic\", \"GI.Bleed\", \"Tumor\", \n                    \"Immunosuppression\", \"Transfer.hx\", \"MI\", \"age\", \"sex\", \n                    \"edu\", \"DASIndex\", \"APACHE.score\", \"Glasgow.Coma.Score\", \n                    \"blood.pressure\", \"WBC\", \"Heart.rate\", \"Respiratory.rate\", \n                    \"Temperature\", \"PaO2vs.FIO2\", \"Albumin\", \"Hematocrit\", \n                    \"Bilirubin\", \"Creatinine\", \"Sodium\", \"Potassium\", \"PaCo2\", \n                    \"PH\", \"Weight\", \"DNR.status\", \"Medical.insurance\", \n                    \"Respiratory.Diag\", \"Cardiovascular.Diag\", \n                    \"Neurological.Diag\", \"Gastrointestinal.Diag\", \"Renal.Diag\", \n                    \"Metabolic.Diag\", \"Hematologic.Diag\", \"Sepsis.Diag\", \n                    \"Trauma.Diag\", \"Orthopedic.Diag\", \"race\", \"income\", \n                    \"Y\", \"A\")\nsaveRDS(ObsData, \"ObsData.rds\")"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-1-dividing-analytic-data-into-three-splits",
+    "href": "DC-TMLE.html#box-1-dividing-analytic-data-into-three-splits",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.3 Box 1: Dividing analytic data into three splits",
+    "text": "2.3 Box 1: Dividing analytic data into three splits\n\nmin.Y &lt;- min(ObsData$Y)\nmax.Y &lt;- max(ObsData$Y)\nObsData$Y.star &lt;- (ObsData$Y-min.Y)/(max.Y-min.Y)\nsplits &lt;- sample(rep(1:3, diff(floor(nrow(ObsData) * c(0, 1/3, 2/3, 3/3)))))\nObsData &lt;- ObsData %&gt;% mutate(s=splits)\n# Create nested data set\ndat_nested_p &lt;- ObsData %&gt;% group_by(s) %&gt;% nest()\ndat_nested_p"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-2-estimation-of-exposure-model-widehatf_pil",
+    "href": "DC-TMLE.html#box-2-estimation-of-exposure-model-widehatf_pil",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.4 Box 2: Estimation of exposure model \\(\\widehat{f_{\\pi}(l)}\\)",
+    "text": "2.4 Box 2: Estimation of exposure model \\(\\widehat{f_{\\pi}(l)}\\)\n\nL &lt;- names(dplyr::select(ObsData, !c(Y, Y.star, A, s)))\npi_fitter &lt;- function(df){\n  SuperLearner::SuperLearner(Y=as.matrix(df[, \"A\"]),\n                             X=df[, L],\n                             family=\"binomial\", \n                             SL.library=c(\"SL.glmnet\", \"SL.randomForest\",\n                                          \"SL.xgboost\"),\n                             cvControl=list(V = 10, stratifyCV = FALSE, \n                                            shuffle = TRUE, validRows = NULL))}\ndat_nested_p &lt;- dat_nested_p %&gt;% mutate(pi_fit = purrr::map(data, pi_fitter))\ndat_nested_p # \"pi_fit\" variable is added to this nested list"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-3-estimating-outcome-nuisance-function-widehatf_ma-l",
+    "href": "DC-TMLE.html#box-3-estimating-outcome-nuisance-function-widehatf_ma-l",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.5 Box 3: Estimating outcome nuisance function \\(\\widehat{f_m(a, l)}\\)",
+    "text": "2.5 Box 3: Estimating outcome nuisance function \\(\\widehat{f_m(a, l)}\\)\n\nA.L &lt;- names(dplyr::select(ObsData, !c(Y, Y.star, s)))\nm_fitter &lt;- function(df){\n  SuperLearner::SuperLearner(Y=as.matrix(df[, \"Y.star\"]),\n                             X=df[, A.L],\n                             family=\"gaussian\", \n                             SL.library=c(\"SL.glmnet\", \"SL.randomForest\",\n                                          \"SL.xgboost\"),\n                             cvControl=list(V = 10, stratifyCV = FALSE, \n                                            shuffle = TRUE, validRows = NULL))\n}\ndat_nested_p &lt;- dat_nested_p %&gt;% mutate(m_fit=purrr::map(data, m_fitter))\ndat_nested_p # \"m_fit\" variable is added to existing list"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-4-predicting-the-probability-of-receiving-rhc-using-widehatf_pil",
+    "href": "DC-TMLE.html#box-4-predicting-the-probability-of-receiving-rhc-using-widehatf_pil",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.6 Box 4: Predicting the probability of receiving RHC using \\(\\widehat{f_{\\pi}(l)}\\)",
+    "text": "2.6 Box 4: Predicting the probability of receiving RHC using \\(\\widehat{f_{\\pi}(l)}\\)\n\nObsData &lt;- ObsData %&gt;%\n  mutate(pi1 = predict(dat_nested_p$pi_fit[[1]], newdata = ObsData[, L])$pred,\n         pi2 = predict(dat_nested_p$pi_fit[[2]], newdata = ObsData[, L])$pred,\n         pi3 = predict(dat_nested_p$pi_fit[[3]], newdata = ObsData[, L])$pred)"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-5-box-5-bounding-the-prediction-to-avoid-positivity-assumption",
+    "href": "DC-TMLE.html#box-5-box-5-bounding-the-prediction-to-avoid-positivity-assumption",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.7 Box 5: Box 5: Bounding the prediction to avoid positivity assumption",
+    "text": "2.7 Box 5: Box 5: Bounding the prediction to avoid positivity assumption\n\nObsData &lt;- ObsData %&gt;%\n  mutate(pi1 = ifelse(pi1&lt;1e-17, 1e-17, ifelse(pi1&gt;(1-1e-17),(1-1e-17), pi1)),\n         pi2 = ifelse(pi2&lt;1e-17, 1e-17, ifelse(pi2&gt;(1-1e-17),(1-1e-17), pi2)), \n         pi3 = ifelse(pi3&lt;1e-17, 1e-17, ifelse(pi3&gt;(1-1e-17),(1-1e-17), pi3)))"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-6-predicting-the-outcome-under-each-exposure-status",
+    "href": "DC-TMLE.html#box-6-predicting-the-outcome-under-each-exposure-status",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.8 Box 6: Predicting the outcome under each exposure status",
+    "text": "2.8 Box 6: Predicting the outcome under each exposure status\n\nObsData1 &lt;- ObsData %&gt;% mutate(A=1)\nObsData0 &lt;- ObsData %&gt;% mutate(A=0)\n\nObsData &lt;- ObsData %&gt;% mutate(\n  mu1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData[, A.L])$pred,\n  mu2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData[, A.L])$pred,\n  mu3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData[, A.L])$pred,\n  mu1_1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData1[, A.L])$pred,\n  mu1_2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData1[, A.L])$pred,\n  mu1_3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData1[, A.L])$pred,\n  mu0_1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData0[, A.L])$pred,\n  mu0_2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData0[, A.L])$pred,\n  mu0_3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData0[, A.L])$pred)"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-7-estimating-the-clever-covariates-widehatha-l",
+    "href": "DC-TMLE.html#box-7-estimating-the-clever-covariates-widehatha-l",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.9 Box 7: Estimating the clever covariates \\(\\widehat{H(a, l)}\\)",
+    "text": "2.9 Box 7: Estimating the clever covariates \\(\\widehat{H(a, l)}\\)\n\nObsData &lt;- ObsData %&gt;% \n  mutate(H1_1 = A/pi1, \n         H1_2 = A/pi2, \n         H1_3 = A/pi3, \n         H0_1 = (1-A)/(1-pi1),\n         H0_2 = (1-A)/(1-pi2), \n         H0_3 = (1-A)/(1-pi3))"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-8-estimating-the-influence-parameter-hatepsilon",
+    "href": "DC-TMLE.html#box-8-estimating-the-influence-parameter-hatepsilon",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.10 Box 8: Estimating the influence parameter \\(\\hat{\\epsilon}\\)",
+    "text": "2.10 Box 8: Estimating the influence parameter \\(\\hat{\\epsilon}\\)\n\ne1 &lt;- coef(glm(Y.star ~ -1 + H0_2 + H1_2 + offset(qlogis(mu3)),\n               data = ObsData %&gt;% filter(s==1), family = binomial))\ne2 &lt;- coef(glm(Y.star ~ -1 + H0_3 + H1_3 + offset(qlogis(mu1)), \n               data = ObsData %&gt;% filter(s==2), family = binomial))\ne3 &lt;- coef(glm(Y.star ~ -1 + H0_1 + H1_1 + offset(qlogis(mu2)), \n               data = ObsData %&gt;% filter(s==3), family = binomial))"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-9-updating-the-predicted-outcomes",
+    "href": "DC-TMLE.html#box-9-updating-the-predicted-outcomes",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.11 Box 9: Updating the predicted outcomes",
+    "text": "2.11 Box 9: Updating the predicted outcomes\n\nObsData = ObsData %&gt;% mutate(\n  mu0_1s = plogis(qlogis(mu0_1) + e3[1] / (1 - pi2)),\n  mu0_2s = plogis(qlogis(mu0_2) + e1[1] / (1 - pi3)),\n  mu0_3s = plogis(qlogis(mu0_3) + e2[1] / (1 - pi1)),\n  mu1_1s = plogis(qlogis(mu1_1) + e3[2] / (pi2)),\n  mu1_2s = plogis(qlogis(mu1_2) + e1[2] / (pi3)),\n  mu1_3s = plogis(qlogis(mu1_3) + e2[2] / (pi1)))"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-10-estimating-the-ate",
+    "href": "DC-TMLE.html#box-10-estimating-the-ate",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.12 Box 10: Estimating the ATE",
+    "text": "2.12 Box 10: Estimating the ATE\n\nr1_1 = mean(filter(ObsData, s==1)$mu1_1s)\nr1_2 = mean(filter(ObsData, s==2)$mu1_2s)\nr1_3 = mean(filter(ObsData, s==3)$mu1_3s)\nr0_1 = mean(filter(ObsData, s==1)$mu0_1s)\nr0_2 = mean(filter(ObsData, s==2)$mu0_2s)\nr0_3 = mean(filter(ObsData, s==3)$mu0_3s)\nATE_1 = r1_1 - r0_1\nATE_2 = r1_2 - r0_2\nATE_3 = r1_3 - r0_3\nATE &lt;- (ATE_1 + ATE_2 + ATE_3)/3"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-11-estimating-the-variance-of-ate",
+    "href": "DC-TMLE.html#box-11-estimating-the-variance-of-ate",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.13 Box 11: Estimating the variance of ATE",
+    "text": "2.13 Box 11: Estimating the variance of ATE\n\n# Estimating efficient influence curve for exposed\nObsData &lt;- ObsData %&gt;% mutate(if1_1 = A/pi2*(Y-mu1_1s) + mu1_1s - r1_1,\n                              if1_2 = A/pi3*(Y-mu1_2s) + mu1_2s - r1_2,\n                              if1_3 = A/pi1*(Y-mu1_3s) + mu1_3s - r1_3)\n# Estimating efficient influence curve for unexposed\nObsData &lt;- ObsData %&gt;% mutate(if0_1 = (1-A)/(1-pi2)*(Y-mu0_1s) + mu0_1s - r0_1,\n                              if0_2 = (1-A)/(1-pi3)*(Y-mu0_2s) + mu0_2s - r0_2,\n                              if0_3 = (1-A)/(1-pi1)*(Y-mu0_3s) + mu0_3s - r0_3)\n# Calculating the variance of ATE\nObsData &lt;- ObsData %&gt;% mutate(ifd_1 = if1_1 - if0_1, \n                              ifd_2 = if1_2 - if0_2,\n                              ifd_3 = if1_3 - if0_3)\n# Variance of local ATE \nvar1_ATE = var(filter(ObsData, s==1)$ifd_1)\nvar2_ATE = var(filter(ObsData, s==2)$ifd_2)\nvar3_ATE = var(filter(ObsData, s==3)$ifd_3)\n# Variance of global ATE\nvar_ATE = (var1_ATE + var2_ATE + var3_ATE)/(3*nrow(ObsData))"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-12-repeating-the-steps-1-11-for-100-times-and-estimate-the-overall-ate-and-variance-of-overall-ate",
+    "href": "DC-TMLE.html#box-12-repeating-the-steps-1-11-for-100-times-and-estimate-the-overall-ate-and-variance-of-overall-ate",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.14 Box 12: Repeating the steps 1-11 for 100 times and estimate the overall ATE and variance of overall ATE",
+    "text": "2.14 Box 12: Repeating the steps 1-11 for 100 times and estimate the overall ATE and variance of overall ATE\n\nmin.Y &lt;- min(ObsData$Y)\nmax.Y &lt;- max(ObsData$Y)\nObsData$Y.star &lt;- (ObsData$Y-min.Y)/(max.Y-min.Y)\n\nDC_tmle_fit = function(ObsData, seed = 123){\n  set.seed(seed)\n  splits &lt;- sample(rep(1:3, diff(floor(nrow(ObsData) * c(0, 1/3, 2/3, 3/3)))))\n  ObsData &lt;- ObsData %&gt;% mutate(s=splits)\n  # Create nested data set\n  ObsData = ObsData %&gt;% mutate(s=splits) %&gt;% arrange(s)\n  # Create nested data set\n  dat_nested_p &lt;- ObsData %&gt;% group_by(s) %&gt;% tidyr::nest()\n  dat_nested_p # a nested list of three data set (splits)  \n  \n  L &lt;- names(dplyr::select(ObsData, !c(Y, Y.star, A, s)))\n  pi_fitter &lt;- function(df){\n    SuperLearner::SuperLearner(Y=as.matrix(df[, \"A\"]),\n                               X=df[, L],\n                               family=\"binomial\", \n                               SL.library=c(\"SL.glmnet\", \"SL.randomForest\",\n                                            \"SL.xgboost\"),\n                               cvControl=list(V = 3, stratifyCV = FALSE, \n                                              shuffle = TRUE, validRows = NULL))}\n  dat_nested_p &lt;- dat_nested_p %&gt;% mutate(pi_fit = purrr::map(data, pi_fitter))\n  dat_nested_p # \"pi_fit\" variable is added to this nested list \n  \n  A.L &lt;- names(dplyr::select(ObsData, !c(Y, Y.star, s)))\n  m_fitter &lt;- function(df){\n    SuperLearner::SuperLearner(Y=as.matrix(df[, \"Y.star\"]),\n                               X=df[, A.L],\n                               family=\"gaussian\", \n                               SL.library=c(\"SL.glmnet\", \"SL.randomForest\",\n                                            \"SL.xgboost\"),\n                               cvControl=list(V = 3, stratifyCV = FALSE, \n                                              shuffle = TRUE, validRows = NULL))\n  }\n  dat_nested_p &lt;- dat_nested_p %&gt;% mutate(m_fit=purrr::map(data, m_fitter))\n  dat_nested_p # \"m_fit\" variable is added to existing list \n  \n  ObsData &lt;- ObsData %&gt;%\n    mutate(pi1 = predict(dat_nested_p$pi_fit[[1]], newdata = ObsData[, L])$pred,\n           pi2 = predict(dat_nested_p$pi_fit[[2]], newdata = ObsData[, L])$pred,\n           pi3 = predict(dat_nested_p$pi_fit[[3]], newdata = ObsData[, L])$pred)\n  \n  ObsData &lt;- ObsData %&gt;%\n    mutate(pi1 = ifelse(pi1&lt;0.00001, 0.00001, ifelse(pi1&gt;0.99999,0.99999, pi1)),\n           pi2 = ifelse(pi2&lt;0.00001, 0.00001, ifelse(pi2&gt;0.99999,0.99999, pi2)), \n           pi3 = ifelse(pi3&lt;0.00001, 0.00001, ifelse(pi3&gt;0.99999,0.99999, pi3)))\n  \n  ObsData1 &lt;- ObsData %&gt;% mutate(A=1)\n  ObsData0 &lt;- ObsData %&gt;% mutate(A=0)\n  \n  ObsData &lt;- ObsData %&gt;% mutate(\n    mu1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData[, A.L])$pred,\n    mu2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData[, A.L])$pred,\n    mu3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData[, A.L])$pred,\n    mu1_1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData1[, A.L])$pred,\n    mu1_2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData1[, A.L])$pred,\n    mu1_3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData1[, A.L])$pred,\n    mu0_1 = predict(dat_nested_p$m_fit[[1]], newdata = ObsData0[, A.L])$pred,\n    mu0_2 = predict(dat_nested_p$m_fit[[2]], newdata = ObsData0[, A.L])$pred,\n    mu0_3 = predict(dat_nested_p$m_fit[[3]], newdata = ObsData0[, A.L])$pred)\n  \n  ObsData &lt;- ObsData %&gt;% \n    mutate(H1_1 = A/pi1, \n           H1_2 = A/pi2, \n           H1_3 = A/pi3, \n           H0_1 = (1-A)/(1-pi1),\n           H0_2 = (1-A)/(1-pi2), \n           H0_3 = (1-A)/(1-pi3))\n  \n  e1 &lt;- coef(glm(Y.star ~ -1 + H0_2 + H1_2 + offset(qlogis(mu3)),\n                 data = ObsData %&gt;% filter(s==1), family = binomial))\n  e2 &lt;- coef(glm(Y.star ~ -1 + H0_3 + H1_3 + offset(qlogis(mu1)), \n                 data = ObsData %&gt;% filter(s==2), family = binomial))\n  e3 &lt;- coef(glm(Y.star ~ -1 + H0_1 + H1_1 + offset(qlogis(mu2)), \n                 data = ObsData %&gt;% filter(s==3), family = binomial))\n  \n  ObsData = ObsData %&gt;% mutate(\n    mu0_1s = plogis(qlogis(mu0_1) + e3[1] / (1 - pi2)),\n    mu0_2s = plogis(qlogis(mu0_2) + e1[1] / (1 - pi3)),\n    mu0_3s = plogis(qlogis(mu0_3) + e2[1] / (1 - pi1)),\n    mu1_1s = plogis(qlogis(mu1_1) + e3[2] / (pi2)),\n    mu1_2s = plogis(qlogis(mu1_2) + e1[2] / (pi3)),\n    mu1_3s = plogis(qlogis(mu1_3) + e2[2] / (pi1)))\n  \n  r1_1 = mean(filter(ObsData, s==1)$mu1_1s)\n  r1_2 = mean(filter(ObsData, s==2)$mu1_2s)\n  r1_3 = mean(filter(ObsData, s==3)$mu1_3s)\n  r0_1 = mean(filter(ObsData, s==1)$mu0_1s)\n  r0_2 = mean(filter(ObsData, s==2)$mu0_2s)\n  r0_3 = mean(filter(ObsData, s==3)$mu0_3s)\n  ATE_1 = r1_1 - r0_1\n  ATE_2 = r1_2 - r0_2\n  ATE_3 = r1_3 - r0_3\n  ATE &lt;- (ATE_1 + ATE_2 + ATE_3) / 3\n  \n  # Estimating efficient influence curve for exposed\n  ObsData &lt;- ObsData %&gt;% mutate(if1_1 = A/pi2*(Y-mu1_1s) + mu1_1s - r1_1,\n                                if1_2 = A/pi3*(Y-mu1_2s) + mu1_2s - r1_2,\n                                if1_3 = A/pi1*(Y-mu1_3s) + mu1_3s - r1_3)\n  # Estimating efficient influence curve for unexposed\n  ObsData &lt;- ObsData %&gt;% mutate(if0_1 = (1-A)/(1-pi2)*(Y-mu0_1s) + mu0_1s - r0_1,\n                                if0_2 = (1-A)/(1-pi3)*(Y-mu0_2s) + mu0_2s - r0_2,\n                                if0_3 = (1-A)/(1-pi1)*(Y-mu0_3s) + mu0_3s - r0_3)\n  # Calculating the variance of ATE\n  ObsData &lt;- ObsData %&gt;% mutate(ifd_1 = if1_1 - if0_1, \n                                ifd_2 = if1_2 - if0_2,\n                                ifd_3 = if1_3 - if0_3)\n  var1_ATE = var(filter(ObsData, s==1)$ifd_1)\n  var2_ATE = var(filter(ObsData, s==2)$ifd_2)\n  var3_ATE = var(filter(ObsData, s==3)$ifd_3)\n  var_ATE = (var1_ATE + var2_ATE + var3_ATE)/(3*nrow(ObsData))\n  result = data.frame(ATE = ATE, var = var_ATE)\n  return(result)\n}\nruns &lt;- list()\nset.seed(2543)\ncf_seed = sample(100)\nfor(i in 1:100){\n  fit_sngle_result = DC_tmle_fit(ObsData = ObsData, seed = cf_seed[i])\n  runs[[i]] &lt;- fit_sngle_result\n}\nresult = dplyr::bind_rows(runs)\nmedians &lt;- apply(result, 2, median, na.rm = TRUE)\nresult &lt;- result %&gt;% mutate(var0 = var + (ATE - medians[1])^2)\n# Calculating overall ATE\nresults &lt;- apply(result, 2, median, na.rm = TRUE)\nt.value = qt((1-conf.level)/2, nrow(ObsData), lower.tail = F)\nl_ci = results[1] - t.value*sqrt(results[3])\nu_ci = results[1] + t.value*sqrt(results[3])\nres = tibble(ATE=results[1], lower.ci = l_ci, upper.ci = u_ci)\nres"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-13-transforming-the-ate-and-its-confidence-interval-back-to-original-scale",
+    "href": "DC-TMLE.html#box-13-transforming-the-ate-and-its-confidence-interval-back-to-original-scale",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.15 Box 13: Transforming the ATE and its confidence interval back to original scale",
+    "text": "2.15 Box 13: Transforming the ATE and its confidence interval back to original scale\n\n# Transforming ATE to original scale\nres*(max.Y-min.Y)"
+  },
+  {
+    "objectID": "DC-TMLE.html#box-14-implementing-dc-tmle-by-r-package",
+    "href": "DC-TMLE.html#box-14-implementing-dc-tmle-by-r-package",
+    "title": "2  Implementation of DC-TMLE",
+    "section": "2.16 Box 14: Implementing DC-TMLE by R package",
+    "text": "2.16 Box 14: Implementing DC-TMLE by R package\n\nlibrary(Crossfit)\nlibrary(SuperLearner)\nObsData = readRDS(\"ObsData.rds\")\nmin.Y &lt;- min(ObsData$Y)\nmax.Y &lt;- max(ObsData$Y)\nObsData$Y.star &lt;- (ObsData$Y-min.Y)/(max.Y-min.Y)\nL &lt;- names(dplyr::select(ObsData, !c(Y, Y.star, A)))\nDC_tmle &lt;- DC_tmle_g1_k(data = ObsData,\n                            exposure = \"A\",\n                            outcome = \"Y.star\",\n                            covarsT = L,\n                            covarsO = L,\n                            family.y = \"gaussian\",\n                            learners = c(\"SL.glmnet\", \"SL.randomForest\", \n                                           \"SL.xgboost\"),\n                            control = list(V = 10, stratifyCV = FALSE, \n                                           shuffle = TRUE, validRows = NULL),\n                            num_cf = 100, \n                            n_split = 3,\n                            seed = 2575,\n                            conf.level = 0.95)\n# Estimates of ATE in transformed scale\nDC_tmle\n# Estimates of ATE in original scale\nDC_tmle*(max.Y-min.Y)"
+  }
+]

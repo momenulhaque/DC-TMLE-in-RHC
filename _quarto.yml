@@ -1,0 +1,22 @@
+project:
+  type: book
+
+book:
+  title: "Application of double cross-fit TMLE estimator to estimate Right Heart Catheterization’s effect on the hospital stays"
+  author: "Momenul Haque Mondol & Ehsan Karim"
+  date: "today"
+  chapters:
+    - index.qmd
+    - DC-TMLE.qmd
+    - references.qmd
+
+bibliography: references.bib
+
+format:
+  html:
+    theme: cosmo
+  pdf:
+    documentclass: scrreprt
+
+editor: visual
+
